@@ -1,0 +1,9 @@
+{
+  "name": "multi-cloud-service-mesh-mtls",
+  "private": true,
+  "scripts": {
+    "generate-certs": "bash ./generate-certs.sh",
+    "start:sidecar": "node ./sidecar-mtls-template.js",
+    "test:mtls": "node ./test-mtls.js"
+  }
+}
