@@ -1,0 +1,10 @@
+{
+  "name": "phase3-weighted-routing",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Additive weighted traffic routing extension for the multi-cloud service mesh project.",
+  "main": "weighted-router.js",
+  "scripts": {
+    "test": "node ./test-phase3.js"
+  }
+}
