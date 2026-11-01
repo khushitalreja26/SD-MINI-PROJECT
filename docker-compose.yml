@@ -1,0 +1,49 @@
+
+services:
+  azure-db:
+    image: postgres:16
+    container_name: azure-postgres
+    environment:
+      POSTGRES_USER: azure_user
+      POSTGRES_PASSWORD: ${AZURE_DB_PASSWORD:?AZURE_DB_PASSWORD is required}
+      POSTGRES_DB: azure_library
+    ports:
+      - "5433:5432"
+    volumes:
+      - azure_data:/var/lib/postgresql/data
+    networks:
+      - azure-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U azure_user -d azure_library"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  render-db:
+    image: postgres:16
+    container_name: render-postgres
+    environment:
+      POSTGRES_USER: render_user
+      POSTGRES_PASSWORD: ${RENDER_DB_PASSWORD:?RENDER_DB_PASSWORD is required}
+      POSTGRES_DB: render_library
+    ports:
+      - "5434:5432"
+    volumes:
+      - render_data:/var/lib/postgresql/data
+    networks:
+      - render-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U render_user -d render_library"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  azure_data:
+  render_data:
+
+networks:
+  azure-net:
+    driver: bridge
+  render-net:
+    driver: bridge

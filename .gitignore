@@ -1,0 +1,27 @@
+# Node.js dependencies
+node_modules/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+
+# Generated certificates and private keys
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Editor files
+.vscode/
+
+# Old backup files
+*-backup.js
+*_backup.js
