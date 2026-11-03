@@ -1,0 +1,236 @@
+
+const https = require("https");
+const http = require("http");
+const fs = require("fs");
+const path = require("path");
+const { createClient } = require("redis");
+
+const certDir = path.join(process.cwd(), "certs");
+const CACHE_TTL = 30;
+
+const redisClient = createClient({
+    url: "redis://localhost:6380"
+});
+
+redisClient.on("error", (error) => {
+    console.error("Redis error:", error.message);
+});
+
+const services = [
+    { name: "book", httpsPort: 4101, httpPort: 4001 },
+    { name: "borrow", httpsPort: 4102, httpPort: 4002 },
+    { name: "member", httpsPort: 4103, httpPort: 4003 },
+    { name: "notification", httpsPort: 4104, httpPort: 4004 }
+];
+
+function isCacheable(service, req) {
+    if (req.method !== "GET") return false;
+
+    if (service.name === "book") {
+        return /^\/books(?:\/|$)/.test(req.url);
+    }
+
+    if (service.name === "member") {
+        return /^\/members(?:\/|$)/.test(req.url);
+    }
+
+    return false;
+}
+
+async function invalidateCache(serviceName) {
+    if (!redisClient.isReady) return;
+
+    const prefix = `multicloud:${serviceName}:`;
+    const keys = [];
+
+    try {
+        for await (const key of redisClient.scanIterator({
+            MATCH: `${prefix}*`,
+            COUNT: 100
+        })) {
+            keys.push(key);
+        }
+
+        if (keys.length > 0) {
+            await redisClient.del(keys);
+        }
+
+        console.log(`${serviceName} cache invalidated`);
+    } catch (error) {
+        console.error("Cache invalidation error:", error.message);
+    }
+}
+
+function startProxy() {
+    for (const service of services) {
+        const options = {
+            key: fs.readFileSync(
+                path.join(certDir, `${service.name}-sidecar.key`)
+            ),
+            cert: fs.readFileSync(
+                path.join(certDir, `${service.name}-sidecar.crt`)
+            ),
+            ca: fs.readFileSync(path.join(certDir, "ca.crt")),
+            requestCert: true,
+            rejectUnauthorized: true
+        };
+
+        const server = https.createServer(options, (req, res) => {
+            const cacheable = isCacheable(service, req);
+            const cacheKey = `multicloud:${service.name}:${req.url}`;
+
+            function forwardRequest() {
+                const headers = { ...req.headers };
+                headers.host = `127.0.0.1:${service.httpPort}`;
+                delete headers.connection;
+
+                const proxyReq = http.request({
+                    hostname: "127.0.0.1",
+                    port: service.httpPort,
+                    path: req.url,
+                    method: req.method,
+                    headers
+                }, (proxyRes) => {
+
+                    if (cacheable) {
+                        const chunks = [];
+
+                        proxyRes.on("data", chunk => chunks.push(chunk));
+
+                        proxyRes.on("end", async () => {
+                            const body = Buffer.concat(chunks);
+
+                            if (
+                                proxyRes.statusCode === 200 &&
+                                redisClient.isReady
+                            ) {
+                                try {
+                                    await redisClient.set(
+                                        cacheKey,
+                                        JSON.stringify({
+                                            statusCode: proxyRes.statusCode,
+                                            headers: proxyRes.headers,
+                                            body: body.toString("base64")
+                                        }),
+                                        { EX: CACHE_TTL }
+                                    );
+                                } catch (error) {
+                                    console.error(
+                                        "Cache write error:",
+                                        error.message
+                                    );
+                                }
+                            }
+
+                            res.writeHead(proxyRes.statusCode, {
+                                ...proxyRes.headers,
+                                "X-Cache": "MISS"
+                            });
+
+                            res.end(body);
+                        });
+
+                        return;
+                    }
+
+                    const isMutation = [
+                        "POST", "PUT", "PATCH", "DELETE"
+                    ].includes(req.method);
+
+                    if (
+                        isMutation &&
+                        proxyRes.statusCode >= 200 &&
+                        proxyRes.statusCode < 300 &&
+                        ["book", "member"].includes(service.name)
+                    ) {
+                        proxyRes.on("end", () => {
+                            invalidateCache(service.name);
+                        });
+                    }
+
+                    proxyRes.pipe(res);
+                });
+
+                proxyReq.on("error", error => {
+                    console.error(
+                        `${service.name} proxy error:`,
+                        error.message
+                    );
+
+                    if (!res.headersSent) {
+                        res.writeHead(502);
+                        res.end("Sidecar unavailable");
+                    }
+                });
+
+                req.pipe(proxyReq);
+            }
+
+            if (cacheable && redisClient.isReady) {
+                redisClient.get(cacheKey)
+                    .then(cached => {
+                        if (cached) {
+                            const entry = JSON.parse(cached);
+
+                            console.log(
+                                `${service.name} CACHE HIT: ${req.url}`
+                            );
+
+                            res.writeHead(entry.statusCode, {
+                                ...entry.headers,
+                                "X-Cache": "HIT"
+                            });
+
+                            res.end(Buffer.from(entry.body, "base64"));
+                        } else {
+                            console.log(
+                                `${service.name} CACHE MISS: ${req.url}`
+                            );
+
+                            forwardRequest();
+                        }
+                    })
+                    .catch(error => {
+                        console.error("Cache read error:", error.message);
+                        forwardRequest();
+                    });
+
+                return;
+            }
+
+            if (cacheable) {
+                console.log(`${service.name} CACHE MISS: ${req.url}`);
+            }
+
+            forwardRequest();
+        });
+
+        server.listen(service.httpsPort, () => {
+            console.log(
+                `${service.name} mTLS proxy listening on https://localhost:${service.httpsPort}`
+            );
+        });
+
+        server.on("tlsClientError", error => {
+            console.log(
+                `${service.name}: rejected TLS client - ${error.message}`
+            );
+        });
+    }
+}
+
+async function main() {
+    try {
+        await redisClient.connect();
+        console.log("Redis connected successfully");
+    } catch (error) {
+        console.error(
+            "Redis unavailable. Proxy will run without caching:",
+            error.message
+        );
+    }
+
+    startProxy();
+}
+
+main();
