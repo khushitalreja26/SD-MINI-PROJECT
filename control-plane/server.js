@@ -46,16 +46,7 @@ const services = {
         trafficWeight: 100,
         healthStatus: "unknown",
         lastChecked: null
-    },
-    bookReplica: {
-  name: "Book Service Replica",
-  cloud: "Azure",
-  serviceURL: "http://localhost:3011",
-  sidecarURL: "http://localhost:4005",
-  trafficWeight: 30,
-  healthStatus: "unknown",
-  lastChecked: null
-},
+    }
 };
 
 // 1. Check the health of one service

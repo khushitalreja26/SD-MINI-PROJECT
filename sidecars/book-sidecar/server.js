@@ -1,8 +1,5 @@
 
 const express = require("express");
-const https = require("https");
-const fs = require("fs");
-const path = require("path");
 
 const app = express();
 app.use(express.json());
@@ -122,19 +119,6 @@ async function startServer() {
     app.listen(PORT, () => {
         console.log(`Book Sidecar running on port ${PORT}`);
     });
-
-    const certDir = path.resolve(__dirname, '..', '..', 'certs');
-    const tlsServer = https.createServer({
-        key: fs.readFileSync(path.join(certDir, 'book-sidecar.key')) ,
-        cert: fs.readFileSync(path.join(certDir, 'book-sidecar.crt')) ,
-        ca: fs.readFileSync(path.join(certDir, 'ca.crt')) ,
-        requestCert: true,
-        rejectUnauthorized: true
-    }, app);
-    tlsServer.listen(4401, () => {
-        console.log('book Sidecar HTTPS mTLS running on port 4401');
-    });
 }
 
 startServer();
-

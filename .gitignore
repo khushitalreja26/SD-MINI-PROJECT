@@ -25,16 +25,3 @@ __pycache__/
 # Old backup files
 *-backup.js
 *_backup.js
-# mTLS certificates
-certs/
-*.crt
-*.csr
-*.srl
-node_modules/
-.env
-.env.*
-!.env.example
-*.key
-*.pem
-*.log
-__pycache__/
